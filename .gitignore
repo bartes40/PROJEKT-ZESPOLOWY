@@ -1,0 +1,63 @@
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+[Dd]esktop.ini
+
+# Editor & IDE directories
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+*.sublime-project
+*.sublime-workspace
+
+# Hardware & Firmware (ESP32, PlatformIO, Arduino)
+.pio/
+.pioenvs/
+.piolibdeps/
+build/
+.espressif/
+*.bin
+*.elf
+*.hex
+*.o
+*.d
+
+# Node.js & Mobile App (React Native / Flutter)
+node_modules/
+.npm/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.expo/
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+
+# Python & Backend
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.env
+.env.*
+!.env.example
+venv/
+.venv/
+env/
+ENV/
+
+# CAD & 3D Printing temp files
+*.tmp
+*.bak
+*.gcode
+
+# General logs
+logs/
+*.log
