@@ -19,6 +19,10 @@ async function ensureLoaded() {
   }
   state.fridge ??= [];
   state.custom ??= [];
+  state.usage ??= {};
+  for (const item of state.fridge) {
+    if (item.unit === 'handful') item.unit = 'ml';
+  }
 }
 
 async function persist() {

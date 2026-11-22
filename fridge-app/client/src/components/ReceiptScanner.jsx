@@ -59,7 +59,7 @@ export default function ReceiptScanner({ categories, onCommit }) {
   async function commit() {
     const items = rows
       .filter((r) => r.keep && r.name.trim())
-      .map((r) => ({ name: r.name.trim(), qty: r.qty, cat: r.cat, days: r.days, emoji: r.emoji }));
+      .map((r) => ({ name: r.name.trim(), qty: r.qty, unit: 'pcs', cat: r.cat, days: r.days, emoji: r.emoji }));
     if (items.length && (await onCommit(items))) {
       setRows(null);
       setText('');

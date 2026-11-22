@@ -34,6 +34,23 @@ export function allProducts(state) {
   return [...CATALOG, ...state.custom];
 }
 
+export function popularProducts(state, limit = 8) {
+  return allProducts(state)
+    .filter((p) => (state.usage?.[p.name] ?? 0) >= 2)
+    .sort((a, b) => (state.usage[b.name] ?? 0) - (state.usage[a.name] ?? 0) || a.name.localeCompare(b.name, 'pl'))
+    .slice(0, limit)
+    .map((p) => p.name);
+}
+
+export function quantityInRange(v, unit, label) {
+  const n = Number(v);
+  const max = unit === 'g' || unit === 'ml' ? 99999 : 999;
+  if (!Number.isFinite(n) || n <= 0 || n > max || (unit !== 'g' && unit !== 'ml' && !Number.isInteger(n))) {
+    throw new HttpError(400, `${label}: niepoprawna ilość`);
+  }
+  return n;
+}
+
 /**
  * Waliduje wejście i dodaje pozycje do lodówki.
  * Brakujące pola (emoji, kategoria, ważność) są uzupełniane z katalogu.
@@ -48,18 +65,20 @@ export function addItems(state, rawItems) {
     const name = typeof it?.name === 'string' ? it.name.trim() : '';
     if (!name || name.length > 80) throw new HttpError(400, 'name: wymagany tekst 1–80 znaków');
     const prod = allProducts(state).find((p) => p.name === name);
-    const qty = intInRange(it.qty ?? 1, 1, 999, 'qty');
+    const unit = it.unit ?? 'pcs';
+    if (!['pcs', 'g', 'ml'].includes(unit)) throw new HttpError(400, 'unit: oczekiwana jednostka pcs, g lub ml');
+    const qty = quantityInRange(it.qty ?? 1, unit, 'qty');
     const days = intInRange(it.days ?? prod?.days ?? 7, 0, 3650, 'days');
     const cat = it.cat ?? prod?.cat ?? 'other';
     if (!CAT_IDS.has(cat)) throw new HttpError(400, `cat: nieznana kategoria "${cat}"`);
     const emoji = it.emoji ?? prod?.emoji ?? CATS.find((c) => c.id === cat).emoji;
-    return { name, qty, days, cat, emoji: String(emoji).slice(0, 8) };
+    return { name, qty, unit, days, cat, emoji: String(emoji).slice(0, 8) };
   });
 
   const added = [];
   for (const r of ready) {
     const expires = addDays(r.days);
-    const same = state.fridge.find((f) => f.name === r.name && f.expires === expires);
+    const same = state.fridge.find((f) => f.name === r.name && f.expires === expires && (f.unit ?? 'pcs') === r.unit);
     if (same) {
       same.qty += r.qty;
       added.push(same);
@@ -70,12 +89,14 @@ export function addItems(state, rawItems) {
         emoji: r.emoji,
         cat: r.cat,
         qty: r.qty,
+        unit: r.unit,
         added: isoDate(new Date()),
         expires,
       };
       state.fridge.push(item);
       added.push(item);
     }
+    state.usage[r.name] = (state.usage[r.name] ?? 0) + 1;
   }
   return added;
 }

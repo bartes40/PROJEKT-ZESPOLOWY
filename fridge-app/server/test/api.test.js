@@ -47,6 +47,23 @@ test('dodawanie z kafelków uzupełnia domyślną ważność i scala duplikaty',
   assert.equal(f.data.items[0].name, 'Chleb'); // sortowanie po terminie ważności (chleb 4 dni < mleko 7)
 });
 
+test('ilość obsługuje jednostki i częstotliwość trafia do popularnych', async () => {
+  let r = await call('POST', '/fridge/items', {
+    items: [{ name: 'Ryż', qty: 250, unit: 'g' }, { name: 'Ryż', qty: 250, unit: 'g' }],
+  });
+  assert.equal(r.status, 201);
+  r = await call('POST', '/fridge/items', { items: [{ name: 'Ryż', qty: 250, unit: 'ml' }] });
+  assert.equal(r.status, 201);
+
+  const f = await call('GET', '/fridge');
+  assert.ok(f.data.items.some((i) => i.name === 'Ryż' && i.unit === 'g' && i.qty === 500));
+  assert.ok(f.data.items.some((i) => i.name === 'Ryż' && i.unit === 'ml' && i.qty === 250));
+
+  r = await call('GET', '/catalog');
+  assert.ok(r.data.popular.includes('Ryż'));
+  assert.equal((await call('POST', '/fridge/items', { items: [{ name: 'Ryż', qty: 1.5, unit: 'pcs' }] })).status, 400);
+});
+
 test('walidacja: zła ilość i nieznana kategoria', async () => {
   assert.equal((await call('POST', '/fridge/items', { items: [{ name: 'X', qty: 0 }] })).status, 400);
   assert.equal((await call('POST', '/fridge/items', { items: [{ name: 'X', cat: 'nope' }] })).status, 400);

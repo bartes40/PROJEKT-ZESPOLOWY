@@ -14,6 +14,12 @@ function label(d) {
   return `${d} dni`;
 }
 
+function qtyLabel(qty, unit) {
+  if (unit === 'g') return `${qty} g`;
+  if (unit === 'ml') return `${qty} ml`;
+  return `× ${qty}`;
+}
+
 export default function FridgeList({ items, categories, onSetQty, onRemove, onClear }) {
   const catName = (id) => categories.find((c) => c.id === id)?.name ?? 'Inne';
 
@@ -40,7 +46,7 @@ export default function FridgeList({ items, categories, onSetQty, onRemove, onCl
                 <div className="e">{f.emoji}</div>
                 <div className="t">
                   <div>
-                    {f.name} <span className="muted">× {f.qty}</span>
+                    {f.name} <span className="muted">{qtyLabel(f.qty, f.unit ?? 'pcs')}</span>
                   </div>
                   <span className={`tag ${cls}`}>{label(d)}</span> <span className="muted">{catName(f.cat)}</span>
                 </div>

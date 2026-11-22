@@ -14,7 +14,7 @@ export default function App() {
   const [tab, setTab] = useState('tiles');
   const [catalog, setCatalog] = useState({ categories: [], products: [] });
   const [fridge, setFridge] = useState([]);
-  const [cart, setCart] = useState({}); // { nazwaProduktu: ilość } – koszyk na kafelkach
+  const [cart, setCart] = useState({}); // { nazwaProduktu: { qty, unit } }
   const [toast, setToast] = useState('');
   const [error, setError] = useState('');
   const toastTimer = useRef();
@@ -50,7 +50,7 @@ export default function App() {
     [loadFridge, notify],
   );
 
-  const cartCount = Object.values(cart).reduce((s, n) => s + n, 0);
+  const cartCount = Object.keys(cart).length;
 
   return (
     <>
@@ -74,16 +74,31 @@ export default function App() {
           <TilePicker
             catalog={catalog}
             cart={cart}
-            onAdd={(name) => setCart((c) => ({ ...c, [name]: (c[name] || 0) + 1 }))}
+            onAdd={(name, qty, unit) =>
+              setCart((c) => ({
+                ...c,
+                [name]: { qty: c[name] ? c[name].qty + qty : qty, unit },
+              }))
+            }
             onRemove={(name) =>
               setCart((c) => {
-                const { [name]: q, ...rest } = c;
-                return q > 1 ? { ...rest, [name]: q - 1 } : rest;
+                const entry = c[name];
+                if (!entry) return c;
+                const nextQty = entry.qty - 1;
+                if (nextQty <= 0) {
+                  const { [name]: removed, ...rest } = c;
+                  return rest;
+                }
+                return { ...c, [name]: { ...entry, qty: nextQty } };
               })
             }
             onClear={() => setCart({})}
             onCommit={async () => {
-              const items = Object.entries(cart).map(([name, qty]) => ({ name, qty }));
+              const items = Object.entries(cart).map(([name, entry]) => ({
+                name,
+                qty: entry.qty,
+                unit: entry.unit,
+              }));
               if (await addToFridge(items, `Dodano ${items.length} produktów do lodówki`)) setCart({});
             }}
             onCreateProduct={async (name, cat) => {

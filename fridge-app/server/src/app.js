@@ -5,7 +5,8 @@ import http from 'node:http';
 import { CATS } from './catalog.js';
 import { parseReceipt, matchProduct } from './parser.js';
 import { read, write } from './store.js';
-import { HttpError, addItems, addCustomProduct, allProducts, sortedFridge, intInRange } from './fridge.js';
+import { HttpError, addItems, addCustomProduct, allProducts, sortedFridge, intInRange, popularProducts, quantityInRange } from './fridge.js';
+import { RECIPES, getRecommendations } from './recipes.js';
 
 const MAX_BODY = 1_000_000; // 1 MB
 
@@ -23,7 +24,7 @@ const route = (method, pattern, handler) => {
 route('GET', '/api/health', async () => ({ ok: true }));
 
 route('GET', '/api/catalog', () =>
-  read((s) => ({ categories: CATS, products: allProducts(s).map(({ kw, ...p }) => p) })),
+  read((s) => ({ categories: CATS, products: allProducts(s).map(({ kw, ...p }) => p), popular: popularProducts(s) })),
 );
 
 route('POST', '/api/catalog/custom', ({ body }) =>
@@ -35,6 +36,12 @@ route('POST', '/api/catalog/custom', ({ body }) =>
 
 route('GET', '/api/fridge', () => read((s) => ({ items: sortedFridge(s) })));
 
+route('GET', '/api/recipes', () => ({ recipes: RECIPES }));
+
+route('GET', '/api/recommendations', () =>
+  read((s) => ({ recommendations: getRecommendations(sortedFridge(s), 2) })),
+);
+
 route('POST', '/api/fridge/items', ({ body }) =>
   write((s) => ({ status: 201, body: { items: addItems(s, body?.items) } })),
 );
@@ -43,9 +50,14 @@ route('PATCH', '/api/fridge/items/:id', ({ params, body }) =>
   write((s) => {
     const item = s.fridge.find((f) => f.id === params.id);
     if (!item) throw new HttpError(404, 'Nie ma takiej pozycji');
-    const qty = intInRange(body?.qty, 0, 999, 'qty');
+    const unit = body?.unit ?? item.unit ?? 'pcs';
+    if (!['pcs', 'g', 'ml'].includes(unit)) throw new HttpError(400, 'unit: oczekiwana jednostka pcs, g lub ml');
+    const qty = body?.qty === 0 ? 0 : quantityInRange(body?.qty, unit, 'qty');
     if (qty === 0) s.fridge = s.fridge.filter((f) => f !== item);
-    else item.qty = qty;
+    else {
+      item.qty = qty;
+      item.unit = unit;
+    }
     return { item: qty === 0 ? null : item };
   }),
 );
