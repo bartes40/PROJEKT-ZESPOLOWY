@@ -105,3 +105,14 @@ test('nieznana trasa i zła metoda', async () => {
   assert.equal((await call('GET', '/nic')).status, 404);
   assert.equal((await call('PUT', '/fridge')).status, 405);
 });
+
+test('baza przepisów i rekomendacje zwracają dokładnie dwie opcje', async () => {
+  const recipes = await call('GET', '/recipes');
+  assert.equal(recipes.status, 200);
+  assert.equal(recipes.data.recipes.length, 15);
+
+  const recommendations = await call('GET', '/recommendations');
+  assert.equal(recommendations.status, 200);
+  assert.equal(recommendations.data.recommendations.length, 2);
+  assert.ok(recommendations.data.recommendations[0].matched.length >= 0);
+});
