@@ -42,10 +42,34 @@ http://IP_KOMPUTERA_W_SIECI:3001
 
 Na przykład `http://192.168.1.20:3001`. Telefon i komputer muszą być w tej samej sieci Wi-Fi.
 
+## Konto, profil i powiadomienia
+
+W aplikacji mobilnej można założyć konto lub się zalogować. Każde konto ma własną lodówkę, liczbę domowników i preferencje dietetyczne. Przepisy są obiadami; otwórz propozycję, aby zobaczyć składniki i instrukcje. Ilości składników są przeliczane dla liczby osób w profilu.
+
+Codzienne przypomnienia są wysyłane przez Expo Push Service o zapisanej godzinie i w strefie czasowej telefonu. Do ich używania potrzebne są:
+
+1. Projekt Expo/EAS oraz skonfigurowane poświadczenia powiadomień push.
+2. Development build aplikacji (Expo Go nie obsługuje push w tym projekcie).
+3. Inicjalizacja projektu i build deweloperski:
+
+```powershell
+cd mobile
+npx eas-cli init
+npx eas-cli build --profile development --platform android
+npx expo start --dev-client
+```
+
+Polecenie `eas init` zapisze identyfikator projektu w konfiguracji, a w panelu Expo należy skonfigurować poświadczenia push. Serwer backendu musi działać, aby wysłać przypomnienie. Hasła są przechowywane jako hashe, a token sesji w bezpiecznym magazynie telefonu.
+
 ## API
 
 | Metoda | Ścieżka | Opis |
 |---|---|---|
+| POST | `/api/auth/register` | Rejestracja użytkownika |
+| POST | `/api/auth/login` | Logowanie i wydanie sesji |
+| GET | `/api/auth/me` | Profil zalogowanego użytkownika |
+| PATCH | `/api/auth/profile` | Zapis preferencji i pory przypomnienia |
+| POST | `/api/auth/logout` | Wylogowanie i wyłączenie push na urządzeniu |
 | GET | `/api/catalog` | Kategorie i produkty |
 | POST | `/api/catalog/custom` | Dodanie własnego produktu |
 | GET | `/api/fridge` | Zawartość lodówki |

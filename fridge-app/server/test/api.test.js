@@ -8,15 +8,19 @@ import fs from 'node:fs';
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fridge-test-'));
 process.env.DB_FILE = path.join(dir, 'db.json');
 const { createApp } = await import('../src/app.js');
+const { sendDueReminders } = await import('../src/auth.js');
 
 const server = createApp();
 await new Promise((r) => server.listen(0, r));
 const base = `http://localhost:${server.address().port}/api`;
 
-const call = async (method, p, body) => {
+const call = async (method, p, body, token) => {
+  const headers = {};
+  if (body) headers['Content-Type'] = 'application/json';
+  if (token) headers.Authorization = `Bearer ${token}`;
   const res = await fetch(base + p, {
     method,
-    headers: body ? { 'Content-Type': 'application/json' } : undefined,
+    headers: Object.keys(headers).length ? headers : undefined,
     body: body ? JSON.stringify(body) : undefined,
   });
   return { status: res.status, data: await res.json() };
@@ -110,9 +114,74 @@ test('baza przepisów i rekomendacje zwracają dokładnie dwie opcje', async () 
   const recipes = await call('GET', '/recipes');
   assert.equal(recipes.status, 200);
   assert.equal(recipes.data.recipes.length, 15);
+  assert.ok(recipes.data.recipes.every((recipe) => recipe.ingredients.every((ingredient) =>
+    typeof ingredient.name === 'string' && typeof ingredient.amount === 'number' && typeof ingredient.unit === 'string')));
+  assert.ok(recipes.data.recipes.every((recipe) => recipe.steps.length > 0));
+  assert.ok(!recipes.data.recipes.some((recipe) => /kanapk|tost|owsiank|naleśnik/i.test(recipe.name)));
 
   const recommendations = await call('GET', '/recommendations');
   assert.equal(recommendations.status, 200);
   assert.equal(recommendations.data.recommendations.length, 2);
   assert.ok(recommendations.data.recommendations[0].matched.length >= 0);
+});
+
+test('konta mają osobne lodówki i rekomendacje respektują dietę', async () => {
+  const registered = await call('POST', '/auth/register', {
+    email: 'osoba@example.com',
+    password: 'bezpieczne-haslo',
+  });
+  assert.equal(registered.status, 201);
+  const token = registered.data.token;
+  assert.equal((await call('POST', '/auth/register', {
+    email: 'osoba@example.com',
+    password: 'bezpieczne-haslo',
+  })).status, 409);
+
+  const legacyFridgeCount = (await call('GET', '/fridge')).data.items.length;
+  assert.equal((await call('POST', '/fridge/items', {
+    items: [{ name: 'Ryż', qty: 1 }],
+  }, token)).status, 201);
+  assert.equal((await call('GET', '/fridge', undefined, token)).data.items.length, 1);
+  assert.equal((await call('GET', '/fridge')).data.items.length, legacyFridgeCount);
+
+  const profile = await call('PATCH', '/auth/profile', {
+    familySize: 4,
+    diet: ['vegan'],
+    notificationTime: '18:30',
+    timezone: 'Europe/Warsaw',
+    expoPushToken: 'ExponentPushToken[test-device]',
+  }, token);
+  assert.equal(profile.status, 200);
+  assert.equal(profile.data.familySize, 4);
+  assert.equal(profile.data.expoPushToken, undefined);
+  assert.equal(profile.data.notificationsEnabled, true);
+  const recommendations = await call('GET', '/recommendations', undefined, token);
+  assert.ok(recommendations.data.recommendations.every((recipe) => recipe.diets.includes('vegan')));
+
+  const originalFetch = globalThis.fetch;
+  let pushCount = 0;
+  globalThis.fetch = async () => {
+    pushCount += 1;
+    return new Response(JSON.stringify({ data: { status: 'ok' } }), { status: 200 });
+  };
+  try {
+    const sent = await sendDueReminders(new Date('2026-01-15T17:31:00.000Z'));
+    assert.equal(sent.length, 1);
+    assert.equal(pushCount, 1);
+    assert.deepEqual(await sendDueReminders(new Date('2026-01-15T17:31:30.000Z')), []);
+    assert.equal(pushCount, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.equal((await call('GET', '/auth/me')).status, 401);
+  assert.equal((await call('POST', '/auth/logout', {}, token)).status, 200);
+  assert.equal((await call('GET', '/fridge', undefined, token)).status, 401);
+  const loggedIn = await call('POST', '/auth/login', {
+    email: 'osoba@example.com',
+    password: 'bezpieczne-haslo',
+  });
+  assert.equal(loggedIn.status, 200);
+  const restoredProfile = await call('GET', '/auth/me', undefined, loggedIn.data.token);
+  assert.equal(restoredProfile.data.notificationsEnabled, false);
 });

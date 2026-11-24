@@ -7,47 +7,73 @@ import { parseReceipt, matchProduct } from './parser.js';
 import { read, write } from './store.js';
 import { HttpError, addItems, addCustomProduct, allProducts, sortedFridge, intInRange, popularProducts, quantityInRange } from './fridge.js';
 import { RECIPES, getRecommendations } from './recipes.js';
+import { authenticate, getProfile, login, logout, register, updateProfile } from './auth.js';
 
 const MAX_BODY = 1_000_000; // 1 MB
 
 const routes = [];
-const route = (method, pattern, handler) => {
+const route = (method, pattern, handler, access = 'optional') => {
   const keys = [];
   const re = new RegExp(
     '^' + pattern.replace(/:(\w+)/g, (_, k) => (keys.push(k), '([^/]+)')) + '/?$',
   );
-  routes.push({ method, re, keys, handler });
+  routes.push({ method, re, keys, handler, access });
 };
 
 /* ---------------- ROUTES ---------------- */
 
-route('GET', '/api/health', async () => ({ ok: true }));
+function userState(state, userId) {
+  if (!userId) return state;
+  state.userData ??= {};
+  state.userData[userId] ??= { fridge: [], custom: [], usage: {} };
+  return state.userData[userId];
+}
 
-route('GET', '/api/catalog', () =>
-  read((s) => ({ categories: CATS, products: allProducts(s).map(({ kw, ...p }) => p), popular: popularProducts(s) })),
+const readForUser = (userId, fn) => read((state) => fn(userState(state, userId)));
+const writeForUser = (userId, fn) => write((state) => fn(userState(state, userId)));
+
+route('GET', '/api/health', async () => ({ ok: true }), 'public');
+
+route('POST', '/api/auth/register', async ({ body }) => ({
+  status: 201,
+  body: await register(body),
+}), 'public');
+
+route('POST', '/api/auth/login', async ({ body }) => login(body), 'public');
+
+route('GET', '/api/auth/me', ({ userId }) => getProfile(userId), 'required');
+
+route('PATCH', '/api/auth/profile', ({ userId, body }) => updateProfile(userId, body), 'required');
+
+route('POST', '/api/auth/logout', ({ userId, token }) => logout(userId, token), 'required');
+
+route('GET', '/api/catalog', ({ userId }) =>
+  readForUser(userId, (s) => ({ categories: CATS, products: allProducts(s).map(({ kw, ...p }) => p), popular: popularProducts(s) })),
 );
 
-route('POST', '/api/catalog/custom', ({ body }) =>
-  write((s) => {
+route('POST', '/api/catalog/custom', ({ userId, body }) =>
+  writeForUser(userId, (s) => {
     const { kw, ...product } = addCustomProduct(s, body);
     return { status: 201, body: { product } };
   }),
 );
 
-route('GET', '/api/fridge', () => read((s) => ({ items: sortedFridge(s) })));
+route('GET', '/api/fridge', ({ userId }) => readForUser(userId, (s) => ({ items: sortedFridge(s) })));
 
-route('GET', '/api/recipes', () => ({ recipes: RECIPES }));
+route('GET', '/api/recipes', () => ({ recipes: RECIPES }), 'public');
 
-route('GET', '/api/recommendations', () =>
-  read((s) => ({ recommendations: getRecommendations(sortedFridge(s), 2) })),
+route('GET', '/api/recommendations', async ({ userId }) => {
+  const diet = userId ? (await getProfile(userId)).diet : [];
+  return readForUser(userId, (s) => ({ recommendations: getRecommendations(sortedFridge(s), 2, diet) }));
+},
 );
 
-route('POST', '/api/fridge/items', ({ body }) =>
-  write((s) => ({ status: 201, body: { items: addItems(s, body?.items) } })),
+route('POST', '/api/fridge/items', ({ userId, body }) =>
+  writeForUser(userId, (s) => ({ status: 201, body: { items: addItems(s, body?.items) } })),
 );
 
-route('PATCH', '/api/fridge/items/:id', ({ params, body }) =>
-  write((s) => {
+route('PATCH', '/api/fridge/items/:id', ({ userId, params, body }) =>
+  writeForUser(userId, (s) => {
     const item = s.fridge.find((f) => f.id === params.id);
     if (!item) throw new HttpError(404, 'Nie ma takiej pozycji');
     const unit = body?.unit ?? item.unit ?? 'pcs';
@@ -62,8 +88,8 @@ route('PATCH', '/api/fridge/items/:id', ({ params, body }) =>
   }),
 );
 
-route('DELETE', '/api/fridge/items/:id', ({ params }) =>
-  write((s) => {
+route('DELETE', '/api/fridge/items/:id', ({ userId, params }) =>
+  writeForUser(userId, (s) => {
     const before = s.fridge.length;
     s.fridge = s.fridge.filter((f) => f.id !== params.id);
     if (s.fridge.length === before) throw new HttpError(404, 'Nie ma takiej pozycji');
@@ -71,16 +97,16 @@ route('DELETE', '/api/fridge/items/:id', ({ params }) =>
   }),
 );
 
-route('DELETE', '/api/fridge', () =>
-  write((s) => {
+route('DELETE', '/api/fridge', ({ userId }) =>
+  writeForUser(userId, (s) => {
     s.fridge = [];
     return { ok: true };
   }),
 );
 
 // Wejście: tekst paragonu (OCR z frontu albo wklejony e-paragon). Wyjście: propozycje do akceptacji.
-route('POST', '/api/receipts/parse', ({ body }) =>
-  read((s) => {
+route('POST', '/api/receipts/parse', ({ userId, body }) =>
+  readForUser(userId, (s) => {
     const text = body?.text;
     if (typeof text !== 'string' || !text.trim()) throw new HttpError(400, 'text: wymagany niepusty tekst');
     if (text.length > 20_000) throw new HttpError(413, 'text: za długi');
@@ -150,9 +176,19 @@ export function createApp() {
         if (!m) continue;
         matchedPath = true;
         if (r.method !== req.method) continue;
+        const authorization = req.headers.authorization;
+        let token = null;
+        let userId = null;
+        if (r.access !== 'public' && authorization) {
+          const match = authorization.match(/^Bearer ([A-Za-z0-9_-]+)$/);
+          if (!match) throw new HttpError(401, 'Nieprawidłowy token sesji');
+          token = match[1];
+          userId = await authenticate(token);
+        }
+        if (r.access === 'required' && !userId) throw new HttpError(401, 'Zaloguj się, aby kontynuować');
         const params = Object.fromEntries(r.keys.map((k, i) => [k, decodeURIComponent(m[i + 1])]));
         const body = ['POST', 'PATCH', 'PUT'].includes(req.method) ? await readJson(req) : undefined;
-        const out = await r.handler({ params, body });
+        const out = await r.handler({ params, body, userId, token });
         return out && out.status ? send(res, out.status, out.body) : send(res, 200, out);
       }
       throw new HttpError(matchedPath ? 405 : 404, matchedPath ? 'Metoda niedozwolona' : 'Nie znaleziono');
